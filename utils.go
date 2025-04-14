@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-sqlite3"
 )
@@ -21,8 +22,42 @@ func init() {
 			log.Printf("Adding executable directory to PATH: %s", execDir)
 			// Add it as the first entry to ensure our DLLs are found first
 			os.Setenv("PATH", execDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			
+			// On Windows, we may need to preload dependencies in the correct order
+			// This is a workaround for some environments where dynamic linking fails
+			preloadDependencies(execDir)
 		} else {
 			log.Printf("Warning: Could not determine executable path: %s", err)
+		}
+	}
+}
+
+// preloadDependencies attempts to preload critical DLLs in the correct order
+// This is Windows-specific and helps with SpatiaLite loading issues
+func preloadDependencies(execDir string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	
+	// List of DLLs to preload in order (from base dependencies to higher-level ones)
+	dlls := []string{
+		"libwinpthread-1.dll",
+		"libgcc_s_seh-1.dll",
+		"libstdc++-6.dll",
+		"libsqlite3-0.dll",
+		"libgeos.dll",
+		"libgeos_c.dll",
+		"libspatialite-5.dll",
+		"mod_spatialite.dll",
+	}
+	
+	for _, dll := range dlls {
+		dllPath := filepath.Join(execDir, dll)
+		_, err := os.Stat(dllPath)
+		if err == nil {
+			log.Printf("Found dependency: %s", dll)
+		} else {
+			log.Printf("Missing expected dependency: %s", dll)
 		}
 	}
 }
@@ -71,19 +106,39 @@ func openDb(sourceGeopackage string) *sql.DB {
 	
 	if runtime.GOOS == "windows" {
 		// Add Windows-specific options
-		loadOptions = append(loadOptions, struct{name string; path string}{"Explicit extension", "mod_spatialite.dll"})
+		exePath, _ := os.Executable()
+		exeDir := filepath.Dir(exePath)
+		
+		// Add additional Windows-specific options
+		loadOptions = append(loadOptions, 
+			struct{name string; path string}{"Explicit extension", "mod_spatialite.dll"},
+			struct{name string; path string}{"Exe directory", filepath.Join(exeDir, "mod_spatialite")},
+			struct{name string; path string}{"Exe directory with ext", filepath.Join(exeDir, "mod_spatialite.dll")},
+			struct{name string; path string}{"Direct DLL reference", exeDir + string(os.PathListSeparator) + "mod_spatialite.dll"},
+		)
 	}
 	
 	var lastErr error
-	for _, option := range loadOptions {
-		_, err = db.Exec(fmt.Sprintf("SELECT load_extension('%s')", option.path))
-		if err == nil {
-			log.Printf("Successfully loaded SpatiaLite extension with option: %s", option.name)
-			spatialiteLoaded = true
-			break
+	// We'll retry the loading a few times with a short delay
+	// This can help in some Windows environments where DLL loading has timing issues
+	maxRetries := 3
+	
+	for attempt := 0; attempt < maxRetries && !spatialiteLoaded; attempt++ {
+		if attempt > 0 {
+			log.Printf("Retrying SpatiaLite loading, attempt %d of %d", attempt+1, maxRetries)
+			time.Sleep(500 * time.Millisecond)
 		}
-		lastErr = err
-		log.Printf("Failed to load SpatiaLite with option '%s': %s", option.name, err)
+		
+		for _, option := range loadOptions {
+			_, err = db.Exec(fmt.Sprintf("SELECT load_extension('%s')", option.path))
+			if err == nil {
+				log.Printf("Successfully loaded SpatiaLite extension with option: %s", option.name)
+				spatialiteLoaded = true
+				break
+			}
+			lastErr = err
+			log.Printf("Failed to load SpatiaLite with option '%s': %s", option.name, err)
+		}
 	}
 	
 	if !spatialiteLoaded {
@@ -95,6 +150,23 @@ func openDb(sourceGeopackage string) *sql.DB {
 			log.Printf("1. Ensure all DLLs are in the same directory as the executable")
 			log.Printf("2. Verify required Visual C++ Redistributable is installed")
 			log.Printf("3. Try renaming 'libgeos.dll' to 'geos.dll' and 'libgeos_c.dll' to 'geos_c.dll'")
+			
+			// Perform diagnostics to help troubleshoot
+			exePath, _ := os.Executable()
+			exeDir := filepath.Dir(exePath)
+			log.Printf("Executable directory: %s", exeDir)
+			log.Printf("Current PATH: %s", os.Getenv("PATH"))
+			
+			// Check for existence of key DLLs
+			dlls := []string{"mod_spatialite.dll", "libspatialite-5.dll", "libgeos.dll", "libgeos_c.dll", "libsqlite3-0.dll"}
+			for _, dll := range dlls {
+				dllPath := filepath.Join(exeDir, dll)
+				if _, err := os.Stat(dllPath); err == nil {
+					log.Printf("Found DLL: %s", dllPath)
+				} else {
+					log.Printf("Missing DLL: %s", dllPath)
+				}
+			}
 		}
 	} else {
 		// Verify SpatiaLite loaded correctly by checking its version

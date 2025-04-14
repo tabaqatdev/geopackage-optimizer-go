@@ -103,20 +103,27 @@ jobs:
           
           # Copy GEOS and SQLite DLLs with correct names
           echo "Copying GEOS and SQLite DLLs with correct names"
-          
+
           # Directly copy the known DLL filenames (avoiding variable substitution issues)
           cp /mingw64/bin/libgeos.dll . || echo "libgeos.dll not found"
           cp /mingw64/bin/libgeos_c.dll . || echo "libgeos_c.dll not found"
-          
+
           # Verify the DLLs were copied correctly
           echo "Verifying copied DLLs:"
           ls -la libgeos*.dll || echo "No GEOS DLLs found in current directory"
-          
+
           # Also copy other required SQLite and SpatiaLite DLLs if not already copied
           cp /mingw64/bin/libsqlite3-0.dll . || echo "libsqlite3-0.dll already exists"
           cp /mingw64/bin/libspatialite-5.dll . || echo "libspatialite-5.dll already exists"
           cp /mingw64/bin/mod_spatialite.dll . || echo "mod_spatialite.dll already exists"
-          
+
+          # Check dependencies of mod_spatialite.dll and copy them all 
+          echo "Copying all dependencies for mod_spatialite.dll..."
+          # This will recursively copy all required DLLs that mod_spatialite depends on
+          ldd /mingw64/bin/mod_spatialite.dll | grep -i "mingw" | awk '{print $3}' | xargs -I{} cp -v {} . || echo "Failed to copy some dependencies"
+          ldd /mingw64/bin/libspatialite-5.dll | grep -i "mingw" | awk '{print $3}' | xargs -I{} cp -v {} . || echo "Failed to copy some dependencies"
+          ldd /mingw64/bin/libgeos_c.dll | grep -i "mingw" | awk '{print $3}' | xargs -I{} cp -v {} . || echo "Failed to copy some dependencies"
+
           # Also copy potential dependency DLLs
           cp /mingw64/bin/libstdc++-6.dll . || echo "libstdc++-6.dll not found"
           cp /mingw64/bin/libwinpthread-1.dll . || echo "libwinpthread-1.dll not found"
