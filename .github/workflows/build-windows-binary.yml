@@ -101,23 +101,40 @@ jobs:
           cp /mingw64/bin/libspatialite-5.dll .
           cp /mingw64/bin/mod_spatialite.dll .
           
+          # Copy GEOS and SQLite DLLs with correct names
+          echo "Copying GEOS and SQLite DLLs with correct names"
+          
+          # Directly copy the known DLL filenames (avoiding variable substitution issues)
+          cp /mingw64/bin/libgeos.dll . || echo "libgeos.dll not found"
+          cp /mingw64/bin/libgeos_c.dll . || echo "libgeos_c.dll not found"
+          
+          # Verify the DLLs were copied correctly
+          echo "Verifying copied DLLs:"
+          ls -la libgeos*.dll || echo "No GEOS DLLs found in current directory"
+          
+          # Also copy other required SQLite and SpatiaLite DLLs if not already copied
+          cp /mingw64/bin/libsqlite3-0.dll . || echo "libsqlite3-0.dll already exists"
+          cp /mingw64/bin/libspatialite-5.dll . || echo "libspatialite-5.dll already exists"
+          cp /mingw64/bin/mod_spatialite.dll . || echo "mod_spatialite.dll already exists"
+          
+          # Also copy potential dependency DLLs
+          cp /mingw64/bin/libstdc++-6.dll . || echo "libstdc++-6.dll not found"
+          cp /mingw64/bin/libwinpthread-1.dll . || echo "libwinpthread-1.dll not found"
+          cp /mingw64/bin/libgcc_s_seh-1.dll . || echo "libgcc_s_seh-1.dll not found"
+          
           # Create a test script to verify DLL loading
-          cat > test_spatialite.go << 'EOF'
+          mkdir -p testutil
+          cat > testutil/test_spatialite.go << 'EOF'
           package main
 
           import (
             "database/sql"
-            "fmt"
             "log"
-            "os"
             _ "github.com/mattn/go-sqlite3"
           )
 
           func main() {
             log.Println("Testing SpatiaLite DLL loading...")
-            
-            // Register the SQLite driver with extensions
-            sql.Register("sqlite3_spatialite", &sql.Driver{})
             
             // Create a temporary database
             db, err := sql.Open("sqlite3", ":memory:?_load_extension=1")
@@ -155,32 +172,10 @@ jobs:
           
           # Test SpatiaLite loading
           echo "Testing SpatiaLite loading..."
-          go run test_spatialite.go || echo "SpatiaLite test failed, but continuing build"
-          
-          # Find and copy GEOS DLLs with correct names
-          GEOS_C_DLL=$(ls /mingw64/bin/libgeos_c*.dll | head -1)
-          GEOS_DLL=$(ls /mingw64/bin/libgeos*.dll | grep -v "_c" | head -1)
-          
-          if [ -n "$GEOS_C_DLL" ]; then
-            echo "Copying GEOS C API DLL: $GEOS_C_DLL"
-            cp "$GEOS_C_DLL" .
-          else
-            echo "GEOS C API DLL not found"
-            ls -la /mingw64/bin/lib*geos*.dll
-          fi
-          
-          if [ -n "$GEOS_DLL" ]; then
-            echo "Copying GEOS DLL: $GEOS_DLL"
-            cp "$GEOS_DLL" .
-          else
-            echo "GEOS DLL not found"
-            ls -la /mingw64/bin/lib*geos*.dll
-          fi
-          
-          # Also copy potential GEOS dependency DLLs
-          cp /mingw64/bin/libstdc++-6.dll . || echo "libstdc++-6.dll not found"
-          cp /mingw64/bin/libwinpthread-1.dll . || echo "libwinpthread-1.dll not found"
-          cp /mingw64/bin/libgcc_s_seh-1.dll . || echo "libgcc_s_seh-1.dll not found"
+          # Copy DLLs to the testutil directory for testing
+          cp *.dll testutil/ || echo "No DLLs found to copy to testutil"
+          cd testutil && go run test_spatialite.go || echo "SpatiaLite test failed, but continuing build"
+          cd ..
           
           # Build with dynamic linking for Windows
           go build -v -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
@@ -190,6 +185,19 @@ jobs:
             echo "Binary built successfully"
             # Show binary information
             file "${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe" || echo "file command not available"
+            
+            # Verify all required DLLs are present
+            echo "Verifying DLL dependencies..."
+            echo "Required DLLs:"
+            ls -la *.dll
+            
+            # Check specifically for GEOS DLLs
+            if [ -f "libgeos.dll" ] && [ -f "libgeos_c.dll" ]; then
+              echo "✓ GEOS DLLs found"
+            else
+              echo "❌ GEOS DLLs missing or incorrectly named"
+              echo "This may cause runtime issues. Expected libgeos.dll and libgeos_c.dll"
+            fi
           else
             echo "Binary build failed"
             exit 1
