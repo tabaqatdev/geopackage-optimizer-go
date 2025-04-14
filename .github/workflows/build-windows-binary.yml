@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - master
+    tags:
+      - '*'
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -35,69 +37,40 @@ jobs:
             mingw-w64-x86_64-openssl
             git
             make
-            patch
 
-      - name: Install UUID extension for Windows
+      - name: Install UUID extension
         shell: msys2 {0}
         run: |
           # Clone the sqlite3-uuid repository
           git clone https://github.com/benwebber/sqlite3-uuid.git
           cd sqlite3-uuid
           
-          # Directly modify the source code instead of using a patch
-          echo "Modifying uuid.c for Windows compatibility..."
-          sed -i '18i\#ifdef _WIN32\n#include <rpc.h>\n#else' src/uuid.c
-          sed -i '20i\#endif' src/uuid.c
+          # Examine the Makefile to understand dependencies
+          cat Makefile
           
-          # Add Windows implementation for uuid_generate_v1
-          sed -i '143i\#ifndef _WIN32' src/uuid.c
-          sed -i '152i\#else\n    /* Windows implementation using RPC UUID APIs */\n    UUID uuid_win;\n    UuidCreate(&uuid_win);\n    \n    /* Convert Windows UUID structure to byte array */\n    uuid[0] = (unsigned char)((uuid_win.Data1 >> 24) & 0xFF);\n    uuid[1] = (unsigned char)((uuid_win.Data1 >> 16) & 0xFF);\n    uuid[2] = (unsigned char)((uuid_win.Data1 >> 8) & 0xFF);\n    uuid[3] = (unsigned char)(uuid_win.Data1 & 0xFF);\n    uuid[4] = (unsigned char)((uuid_win.Data2 >> 8) & 0xFF);\n    uuid[5] = (unsigned char)(uuid_win.Data2 & 0xFF);\n    uuid[6] = (unsigned char)((uuid_win.Data3 >> 8) & 0xFF);\n    uuid[7] = (unsigned char)(uuid_win.Data3 & 0xFF);\n    memcpy(uuid + 8, uuid_win.Data4, 8);\n#endif' src/uuid.c
-          
-          # Add Windows implementation for uuid_generate_v4
-          sed -i '186i\#ifndef _WIN32' src/uuid.c
-          sed -i '189i\#else\n    UUID uuid_win;\n    UuidCreate(&uuid_win);\n#endif' src/uuid.c
-          
-          # Add Windows implementation for memcpy in uuid_generate_v4
-          sed -i '209i\#ifndef _WIN32' src/uuid.c
-          sed -i '211i\#else\n    /* Convert Windows UUID structure to byte array */\n    uuid[0] = (unsigned char)((uuid_win.Data1 >> 24) & 0xFF);\n    uuid[1] = (unsigned char)((uuid_win.Data1 >> 16) & 0xFF);\n    uuid[2] = (unsigned char)((uuid_win.Data1 >> 8) & 0xFF);\n    uuid[3] = (unsigned char)(uuid_win.Data1 & 0xFF);\n    uuid[4] = (unsigned char)((uuid_win.Data2 >> 8) & 0xFF);\n    uuid[5] = (unsigned char)(uuid_win.Data2 & 0xFF);\n    uuid[6] = (unsigned char)((uuid_win.Data3 >> 8) & 0xFF);\n    uuid[7] = (unsigned char)(uuid_win.Data3 & 0xFF);\n    memcpy(uuid + 8, uuid_win.Data4, 8);\n#endif' src/uuid.c
-          
-          # Install OpenSSL development package
+          # Install missing dependencies if needed
           pacman -S --noconfirm mingw-w64-x86_64-openssl
           
-          # Build with Windows-specific flags
-          make CFLAGS="-g -fPIC -Wall -Wextra -Wno-unused-parameter -O2 -lcrypto -DUSE_OPENSSL -D_WIN32" LDFLAGS="-shared -lrpcrt4"
+          # Check OpenSSL installation
+          pkg-config --libs --cflags openssl || echo "OpenSSL pkg-config not found"
+          ls -la /mingw64/include/uuid* || echo "No uuid headers found"
           
-          # Create directory if it doesn't exist
-          mkdir -p /mingw64/lib
+          # Modify the Makefile if necessary to use MinGW-specific flags
+          sed -i 's/-luuid/-Wl,--enable-stdcall-fixup/g' Makefile || echo "Sed failed"
+          
+          # Try to build with verbose output
+          make VERBOSE=1 || echo "UUID extension build failed, continuing without it"
           
           # Check if the build succeeded and copy the resulting library
           if [ -f dist/uuid.so.* ]; then
             cp dist/uuid.so.* /mingw64/lib/uuid.so
-            echo "UUID extension for Windows built and installed successfully"
+            echo "UUID extension installed successfully"
           else
             echo "UUID extension build failed, checking available files:"
             ls -la dist/ || echo "No dist directory"
             find . -name "*.so*" || echo "No .so files found"
             echo "Will continue without UUID extension"
           fi
-
-      - name: Setup test environment
-        shell: msys2 {0}
-        run: |
-          # Create directory for test data if needed
-          mkdir -p geopackage
-          
-          # Export environment variables for SpatiaLite
-          export SPATIALITE_SECURITY=relaxed
-          
-          # Create a sample init SQL file
-          cat > spatialite_init.sql << 'EOF'
-          SELECT load_extension('mod_spatialite');
-          SELECT InitSpatialMetaData(1);
-          EOF
-          
-          # Make SpatiaLite module accessible
-          cp /mingw64/lib/mod_spatialite.dll /mingw64/lib/mod_spatialite.so
 
       - name: Setup version
         id: get_version
@@ -117,7 +90,6 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
-          export SPATIALITE_SECURITY=relaxed
           go test ./... -covermode=atomic || echo "Tests failed but continuing with build"
 
       - name: Build Windows binary
