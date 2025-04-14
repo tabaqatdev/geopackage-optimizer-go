@@ -65,7 +65,80 @@ func optimizeOAFGeopackage(sourceGeopackage string, config string) {
 
 			if layerCfg.ExternalFidColumns != nil {
 				addColumn(tableName, "external_fid", "TEXT", db)
-				setColumnValue(tableName, "external_fid", fmt.Sprintf("uuid5('%s', '%s'||%s)", pdokNamespace, tableName, strings.Join(layerCfg.ExternalFidColumns, "||")), db)
+
+				pdokNamespaceUUID, err := uuid.Parse(pdokNamespace)
+				if err != nil {
+					log.Fatalf("failed to parse PDOK namespace UUID: %v", err)
+				}
+
+				log.Printf("Generating and setting external_fid UUIDv5 values for table '%s' based on columns: %v...", tableName, layerCfg.ExternalFidColumns)
+				tx, err := db.Begin()
+				if err != nil {
+					log.Fatalf("failed to begin transaction: %v", err)
+				}
+
+				selectCols := append([]string{layerCfg.FidColumn}, layerCfg.ExternalFidColumns...)
+				query := fmt.Sprintf("SELECT %s FROM \"%s\"", strings.Join(selectCols, ", "), tableName)
+				rows, err := tx.Query(query)
+				if err != nil {
+					tx.Rollback()
+					log.Fatalf("failed to query table %s: %v", tableName, err)
+				}
+				defer rows.Close()
+
+				updateStmt, err := tx.Prepare(fmt.Sprintf("UPDATE \"%s\" SET external_fid = ? WHERE %s = ?", tableName, layerCfg.FidColumn))
+				if err != nil {
+					tx.Rollback()
+					log.Fatalf("failed to prepare update statement for table %s: %v", tableName, err)
+				}
+				defer updateStmt.Close()
+
+				values := make([]interface{}, len(selectCols))
+				scanArgs := make([]interface{}, len(selectCols))
+				for i := range values {
+					scanArgs[i] = &values[i]
+				}
+
+				rowCount := 0
+				for rows.Next() {
+					err = rows.Scan(scanArgs...)
+					if err != nil {
+						tx.Rollback()
+						log.Fatalf("failed to scan row for table %s: %v", tableName, err)
+					}
+
+					dataParts := make([]string, 0, len(values))
+					dataParts = append(dataParts, tableName)
+					for _, val := range values[1:] { // Skip the fid column (index 0)
+						if val == nil {
+							dataParts = append(dataParts, "")
+						} else {
+							dataParts = append(dataParts, fmt.Sprintf("%v", val))
+						}
+					}
+					dataString := strings.Join(dataParts, "")
+
+					newUUID := uuid.NewSHA1(pdokNamespaceUUID, []byte(dataString))
+
+					fidValue := values[0] // Get the primary key value
+					_, err = updateStmt.Exec(newUUID.String(), fidValue)
+					if err != nil {
+						tx.Rollback()
+						log.Fatalf("failed to update row for table %s with fid %v: %v", tableName, fidValue, err)
+					}
+					rowCount++
+				}
+				if err = rows.Err(); err != nil {
+					tx.Rollback()
+					log.Fatalf("error iterating rows for table %s: %v", tableName, err)
+				}
+
+				err = tx.Commit()
+				if err != nil {
+					log.Fatalf("failed to commit transaction for table %s: %v", tableName, err)
+				}
+				log.Printf("Finished setting external_fid values for %d rows in table '%s'.", rowCount, tableName)
+
 				createIndex(tableName, []string{"external_fid"}, fmt.Sprintf("%s_external_fid_idx", tableName), false, db)
 			}
 
