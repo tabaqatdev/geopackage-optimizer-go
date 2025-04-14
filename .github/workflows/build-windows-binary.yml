@@ -130,11 +130,23 @@ jobs:
           import (
             "database/sql"
             "log"
+            "os"
+            "path/filepath"
+            "runtime"
+            "fmt"
             _ "github.com/mattn/go-sqlite3"
           )
 
           func main() {
             log.Println("Testing SpatiaLite DLL loading...")
+            
+            // Add executable directory to PATH for Windows
+            execPath, err := os.Executable()
+            if err == nil {
+              execDir := filepath.Dir(execPath)
+              log.Printf("Adding executable directory to PATH: %s", execDir)
+              os.Setenv("PATH", execDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+            }
             
             // Create a temporary database
             db, err := sql.Open("sqlite3", ":memory:?_load_extension=1")
@@ -143,30 +155,56 @@ jobs:
             }
             defer db.Close()
             
-            // Try to load the SpatiaLite extension
-            _, err = db.Exec("SELECT load_extension('mod_spatialite')")
-            if err != nil {
-              log.Printf("Error loading mod_spatialite: %s", err)
-              log.Println("Trying with explicit path...")
-              
-              // Try with explicit path
-              _, err = db.Exec("SELECT load_extension('./mod_spatialite')")
-              if err != nil {
-                log.Fatalf("Error loading mod_spatialite with explicit path: %s", err)
-              }
-              log.Println("Successfully loaded mod_spatialite with explicit path")
-            } else {
-              log.Println("Successfully loaded mod_spatialite")
+            // Try multiple loading strategies
+            loadOptions := []struct {
+              name string
+              path string
+            }{
+              {"Default", "mod_spatialite"},
+              {"Relative path", "./mod_spatialite"},
+              {"With extension", "mod_spatialite.dll"},
+              {"Current directory", filepath.Join(filepath.Dir(execPath), "mod_spatialite")},
             }
             
-            // Verify SpatiaLite functionality
-            var version string
-            err = db.QueryRow("SELECT spatialite_version()").Scan(&version)
-            if err != nil {
-              log.Fatalf("Error checking SpatiaLite version: %s", err)
+            success := false
+            var lastErr error
+            for _, option := range loadOptions {
+              log.Printf("Trying to load with option: %s (%s)", option.name, option.path)
+              _, err = db.Exec(fmt.Sprintf("SELECT load_extension('%s')", option.path))
+              if err == nil {
+                log.Printf("Successfully loaded SpatiaLite with option: %s", option.name)
+                success = true
+                
+                // Verify SpatiaLite functionality
+                var version string
+                err = db.QueryRow("SELECT spatialite_version()").Scan(&version)
+                if err != nil {
+                  log.Printf("Error checking SpatiaLite version: %s", err)
+                } else {
+                  log.Printf("SpatiaLite version: %s", version)
+                  log.Println("SpatiaLite test successful!")
+                }
+                break
+              } else {
+                lastErr = err
+                log.Printf("Failed with error: %s", err)
+              }
             }
-            log.Printf("SpatiaLite version: %s", version)
-            log.Println("SpatiaLite test successful!")
+            
+            if !success {
+              log.Printf("All SpatiaLite loading attempts failed. Last error: %s", lastErr)
+              log.Println("Checking for DLL files in executable directory...")
+              
+              // List DLLs to help with debugging
+              if files, err := filepath.Glob(filepath.Join(filepath.Dir(execPath), "*.dll")); err == nil {
+                log.Println("Available DLLs:")
+                for _, file := range files {
+                  log.Printf(" - %s", filepath.Base(file))
+                }
+              }
+              
+              os.Exit(1)
+            }
           }
           EOF
           
@@ -193,9 +231,9 @@ jobs:
             
             # Check specifically for GEOS DLLs
             if [ -f "libgeos.dll" ] && [ -f "libgeos_c.dll" ]; then
-              echo "✓ GEOS DLLs found"
+              echo " GEOS DLLs found"
             else
-              echo "❌ GEOS DLLs missing or incorrectly named"
+              echo " GEOS DLLs missing or incorrectly named"
               echo "This may cause runtime issues. Expected libgeos.dll and libgeos_c.dll"
             fi
           else

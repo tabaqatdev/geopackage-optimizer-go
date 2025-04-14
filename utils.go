@@ -4,10 +4,28 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/mattn/go-sqlite3"
 )
+
+func init() {
+	// Add executable directory to PATH for Windows to help find DLLs
+	if runtime.GOOS == "windows" {
+		execPath, err := os.Executable()
+		if err == nil {
+			execDir := filepath.Dir(execPath)
+			log.Printf("Adding executable directory to PATH: %s", execDir)
+			// Add it as the first entry to ensure our DLLs are found first
+			os.Setenv("PATH", execDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		} else {
+			log.Printf("Warning: Could not determine executable path: %s", err)
+		}
+	}
+}
 
 func registerDriver(driverName string, extensions []string) {
 	for _, driver := range sql.Drivers() {
@@ -21,8 +39,11 @@ func registerDriver(driverName string, extensions []string) {
 }
 
 func openDb(sourceGeopackage string) *sql.DB {
+	driverName := "sqlite3_with_extensions"
+	
+	// Register driver with SpatiaLite extension
 	registerDriver(
-		"sqlite3_with_extensions",
+		driverName,
 		[]string{
 			"mod_spatialite",
 		},
@@ -30,21 +51,57 @@ func openDb(sourceGeopackage string) *sql.DB {
 
 	// Use URI connection string with flags to help locate extensions
 	connString := fmt.Sprintf("%s?_load_extension=1", sourceGeopackage)
-	db, err := sql.Open("sqlite3_with_extensions", connString)
+	db, err := sql.Open(driverName, connString)
 	if err != nil {
 		log.Fatalf("error opening source GeoPackage: %s", err)
 	}
 
-	// Initialize the SpatiaLite extension
-	_, err = db.Exec("SELECT load_extension('mod_spatialite')")
-	if err != nil {
-		// Try with full path if relative path fails
-		_, err = db.Exec("SELECT load_extension('./mod_spatialite')")
-		if err != nil {
-			log.Printf("Warning: Could not load SpatiaLite extension: %s", err)
-			// Continue anyway as we may be able to perform some operations
-		} else {
-			log.Printf("Successfully loaded SpatiaLite extension with explicit path")
+	// Initialize the SpatiaLite extension with different strategies
+	spatialiteLoaded := false
+	
+	// Try options in order of most likely to succeed
+	loadOptions := []struct {
+		name string
+		path string
+	}{
+		{"Default", "mod_spatialite"},
+		{"Relative path", "./mod_spatialite"},
+		{"Full path Windows", filepath.Join(filepath.Dir(sourceGeopackage), "mod_spatialite")},
+	}
+	
+	if runtime.GOOS == "windows" {
+		// Add Windows-specific options
+		loadOptions = append(loadOptions, struct{name string; path string}{"Explicit extension", "mod_spatialite.dll"})
+	}
+	
+	var lastErr error
+	for _, option := range loadOptions {
+		_, err = db.Exec(fmt.Sprintf("SELECT load_extension('%s')", option.path))
+		if err == nil {
+			log.Printf("Successfully loaded SpatiaLite extension with option: %s", option.name)
+			spatialiteLoaded = true
+			break
+		}
+		lastErr = err
+		log.Printf("Failed to load SpatiaLite with option '%s': %s", option.name, err)
+	}
+	
+	if !spatialiteLoaded {
+		log.Printf("Warning: Could not load SpatiaLite extension: %s", lastErr)
+		log.Printf("Will attempt to continue without SpatiaLite functionality")
+		
+		if runtime.GOOS == "windows" {
+			log.Printf("Windows troubleshooting tips:")
+			log.Printf("1. Ensure all DLLs are in the same directory as the executable")
+			log.Printf("2. Verify required Visual C++ Redistributable is installed")
+			log.Printf("3. Try renaming 'libgeos.dll' to 'geos.dll' and 'libgeos_c.dll' to 'geos_c.dll'")
+		}
+	} else {
+		// Verify SpatiaLite loaded correctly by checking its version
+		var version string
+		err = db.QueryRow("SELECT spatialite_version()").Scan(&version)
+		if err == nil {
+			log.Printf("SpatiaLite version: %s", version)
 		}
 	}
 
