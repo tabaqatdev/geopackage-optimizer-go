@@ -125,8 +125,18 @@ jobs:
           go env
           
           echo "Building Windows binary..."
-          # Use specific flags to ensure static linking of SQLite
-          go build -v -tags "sqlite_omit_load_extension" -ldflags="-s -w -linkmode external -extldflags '-static -lsqlite3 -lspatialite -lm -lz -lgeos_c -lpthread'" -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
+          # Copy required DLLs to the current directory
+          cp /mingw64/bin/libsqlite3-0.dll .
+          cp /mingw64/bin/libspatialite-5.dll .
+          cp /mingw64/bin/libgeos_c-1.dll .
+          cp /mingw64/bin/libgeos-3-12-1.dll .
+          
+          # List all available DLLs for debugging
+          echo "Available DLLs in /mingw64/bin:"
+          ls -la /mingw64/bin/*.dll | grep -E 'sqlite|spatialite|geos'
+          
+          # Build with dynamic linking for Windows
+          go build -v -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
           
           # Verify the binary was created
           if [ -f "${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe" ]; then
