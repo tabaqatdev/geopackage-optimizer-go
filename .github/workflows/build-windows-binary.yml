@@ -82,6 +82,19 @@ jobs:
             echo "version=dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Copy SQLite DLLs to system path
+        shell: msys2 {0}
+        run: |
+          echo "Copying SQLite DLLs to Windows system path"
+          # Find SQLite DLLs
+          find /mingw64 -name "*.dll" | grep -i "sqlite\|spatialite"
+          # Copy SQLite DLLs to a location in PATH
+          mkdir -p /mingw64/bin/
+          cp /mingw64/bin/libsqlite3-0.dll /mingw64/bin/ || echo "libsqlite3-0.dll not found"
+          cp /mingw64/bin/libspatialite*.dll /mingw64/bin/ || echo "libspatialite DLL not found"
+          # List copied files
+          ls -la /mingw64/bin/libsqlite* /mingw64/bin/libspatialite* || echo "DLLs not found"
+
       - name: Run tests
         shell: msys2 {0}
         run: |
@@ -90,6 +103,9 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
+          # Set CGO flags explicitly
+          export CGO_LDFLAGS="-L/mingw64/lib"
+          export CGO_CFLAGS="-I/mingw64/include"
           go test ./... -covermode=atomic || echo "Tests failed but continuing with build"
 
       - name: Build Windows binary
@@ -100,13 +116,17 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
+          # Set CGO flags explicitly to find dependencies
+          export CGO_LDFLAGS="-L/mingw64/lib"
+          export CGO_CFLAGS="-I/mingw64/include"
           
           # Print environment for debugging
           echo "Go environment:"
           go env
           
           echo "Building Windows binary..."
-          go build -v -ldflags="-s -w -linkmode external -extldflags '-static'" -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
+          # Use specific flags to ensure static linking of SQLite
+          go build -v -tags "sqlite_omit_load_extension" -ldflags="-s -w -linkmode external -extldflags '-static -lsqlite3 -lspatialite -lm -lz -lgeos_c -lpthread'" -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
           
           # Verify the binary was created
           if [ -f "${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe" ]; then
