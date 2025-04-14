@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/creasty/defaults"
+	"github.com/google/uuid"
 )
 
 const (
@@ -111,13 +112,53 @@ func optimizeOWSGeopackage(sourceGeopackage string, config string) {
 
 	for _, tableName := range tableNames {
 		columnName := "puuid"
-		value := "uuid4()"
 		addColumn(tableName, columnName, "TEXT", db)
-		setColumnValue(tableName, columnName, value, db)
+
+		log.Printf("Generating and setting puuid values for table '%s'...\n", tableName)
+		rows, err := db.Query(fmt.Sprintf("SELECT rowid FROM '%s'", tableName))
+		if err != nil {
+			log.Fatalf("error selecting rowids from '%s': %s", tableName, err)
+		}
+		defer rows.Close()
+
+		tx, err := db.Begin()
+		if err != nil {
+			log.Fatalf("error beginning transaction: %s", err)
+		}
+
+		stmt, err := tx.Prepare(fmt.Sprintf("UPDATE '%s' SET %s = ? WHERE rowid = ?", tableName, columnName))
+		if err != nil {
+			log.Fatalf("error preparing update statement for '%s': %s", tableName, err)
+		}
+		defer stmt.Close()
+
+		var rowid int64
+		for rows.Next() {
+			if err := rows.Scan(&rowid); err != nil {
+				tx.Rollback() // Rollback on error
+				log.Fatalf("error scanning rowid: %s", err)
+			}
+			newUUID := uuid.New().String()
+			_, err = stmt.Exec(newUUID, rowid)
+			if err != nil {
+				tx.Rollback() // Rollback on error
+				log.Fatalf("error updating row %d in table '%s': %s", rowid, tableName, err)
+			}
+		}
+		if err = rows.Err(); err != nil { // Check for errors during iteration
+		    tx.Rollback()
+		    log.Fatalf("error iterating rows for table '%s': %s", tableName, err)
+		}
+
+		if err = tx.Commit(); err != nil {
+			log.Fatalf("error committing transaction for '%s': %s", tableName, err)
+		}
+		log.Printf("Finished setting puuid values for table '%s'.\n", tableName)
+
 		createIndex(tableName, []string{columnName}, "", true, db)
 
 		columnName = "fuuid"
-		value = fmt.Sprintf("'%s.' || puuid", tableName)
+		value := fmt.Sprintf("'%s.' || puuid", tableName)
 		addColumn(tableName, columnName, "TEXT", db)
 		setColumnValue(tableName, columnName, value, db)
 		createIndex(tableName, []string{columnName}, "", true, db)

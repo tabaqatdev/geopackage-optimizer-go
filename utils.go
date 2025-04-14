@@ -25,7 +25,6 @@ func openDb(sourceGeopackage string) *sql.DB {
 		"sqlite3_with_extensions",
 		[]string{
 			"mod_spatialite",
-			"uuid",
 		},
 	)
 

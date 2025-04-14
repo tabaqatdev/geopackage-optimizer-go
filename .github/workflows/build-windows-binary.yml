@@ -135,9 +135,6 @@ jobs:
           cp /mingw64/bin/libspatialite-5.dll .
           cp /mingw64/bin/mod_spatialite.dll .
           
-          # Copy the uuid SQLite extension
-          cp /mingw64/share/sqlite/extensions/uuid.dll .
-          
           # Find and copy GEOS DLLs with correct names
           GEOS_C_DLL=$(ls /mingw64/bin/libgeos_c*.dll | head -1)
           GEOS_DLL=$(ls /mingw64/bin/libgeos*.dll | grep -v "_c" | head -1)
