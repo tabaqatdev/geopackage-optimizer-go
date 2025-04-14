@@ -29,6 +29,8 @@ jobs:
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libspatialite
             mingw-w64-x86_64-gdal
+            mingw-w64-x86_64-libuuid
+            mingw-w64-x86_64-util-linux
             git
             make
 
@@ -71,7 +73,7 @@ jobs:
           go build -v -ldflags="-s -w -linkmode external -extldflags '-static'" -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4  # Updated to v4
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64
           path: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe
