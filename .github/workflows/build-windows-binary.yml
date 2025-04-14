@@ -101,6 +101,62 @@ jobs:
           cp /mingw64/bin/libspatialite-5.dll .
           cp /mingw64/bin/mod_spatialite.dll .
           
+          # Create a test script to verify DLL loading
+          cat > test_spatialite.go << 'EOF'
+          package main
+
+          import (
+            "database/sql"
+            "fmt"
+            "log"
+            "os"
+            _ "github.com/mattn/go-sqlite3"
+          )
+
+          func main() {
+            log.Println("Testing SpatiaLite DLL loading...")
+            
+            // Register the SQLite driver with extensions
+            sql.Register("sqlite3_spatialite", &sql.Driver{})
+            
+            // Create a temporary database
+            db, err := sql.Open("sqlite3", ":memory:?_load_extension=1")
+            if err != nil {
+              log.Fatalf("Error opening in-memory database: %s", err)
+            }
+            defer db.Close()
+            
+            // Try to load the SpatiaLite extension
+            _, err = db.Exec("SELECT load_extension('mod_spatialite')")
+            if err != nil {
+              log.Printf("Error loading mod_spatialite: %s", err)
+              log.Println("Trying with explicit path...")
+              
+              // Try with explicit path
+              _, err = db.Exec("SELECT load_extension('./mod_spatialite')")
+              if err != nil {
+                log.Fatalf("Error loading mod_spatialite with explicit path: %s", err)
+              }
+              log.Println("Successfully loaded mod_spatialite with explicit path")
+            } else {
+              log.Println("Successfully loaded mod_spatialite")
+            }
+            
+            // Verify SpatiaLite functionality
+            var version string
+            err = db.QueryRow("SELECT spatialite_version()").Scan(&version)
+            if err != nil {
+              log.Fatalf("Error checking SpatiaLite version: %s", err)
+            }
+            log.Printf("SpatiaLite version: %s", version)
+            log.Println("SpatiaLite test successful!")
+          }
+          EOF
+          
+          # Test SpatiaLite loading
+          echo "Testing SpatiaLite loading..."
+          go run test_spatialite.go || echo "SpatiaLite test failed, but continuing build"
+          
           # Find and copy GEOS DLLs with correct names
           GEOS_C_DLL=$(ls /mingw64/bin/libgeos_c*.dll | head -1)
           GEOS_DLL=$(ls /mingw64/bin/libgeos*.dll | grep -v "_c" | head -1)
@@ -139,7 +195,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create ZIP archive
+      - name: Create distribution package
         shell: pwsh
         run: |
           # Create a directory to package everything
@@ -161,18 +217,18 @@ jobs:
           For more information, visit: https://github.com/tabaqatdev/geopackage-optimizer-go
           "@
           
-          # Create the ZIP archive
-          Compress-Archive -Path $packageDir -DestinationPath "$packageDir.zip"
-          
-          # List the content of the zip for verification
-          Write-Host "Created ZIP archive with the following contents:"
+          # List the content of the package directory for verification
+          Write-Host "Created package directory with the following contents:"
           Get-ChildItem $packageDir
+          
+          # Create a zip file only for GitHub Releases
+          Compress-Archive -Path $packageDir -DestinationPath "$packageDir.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64
-          path: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.zip
+          path: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

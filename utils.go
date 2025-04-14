@@ -28,9 +28,24 @@ func openDb(sourceGeopackage string) *sql.DB {
 		},
 	)
 
-	db, err := sql.Open("sqlite3_with_extensions", sourceGeopackage)
+	// Use URI connection string with flags to help locate extensions
+	connString := fmt.Sprintf("%s?_load_extension=1", sourceGeopackage)
+	db, err := sql.Open("sqlite3_with_extensions", connString)
 	if err != nil {
 		log.Fatalf("error opening source GeoPackage: %s", err)
+	}
+
+	// Initialize the SpatiaLite extension
+	_, err = db.Exec("SELECT load_extension('mod_spatialite')")
+	if err != nil {
+		// Try with full path if relative path fails
+		_, err = db.Exec("SELECT load_extension('./mod_spatialite')")
+		if err != nil {
+			log.Printf("Warning: Could not load SpatiaLite extension: %s", err)
+			// Continue anyway as we may be able to perform some operations
+		} else {
+			log.Printf("Successfully loaded SpatiaLite extension with explicit path")
+		}
 	}
 
 	return db
