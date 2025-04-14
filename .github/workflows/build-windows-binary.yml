@@ -38,40 +38,6 @@ jobs:
             git
             make
 
-      - name: Install UUID extension
-        shell: msys2 {0}
-        run: |
-          # Clone the sqlite3-uuid repository
-          git clone https://github.com/benwebber/sqlite3-uuid.git
-          cd sqlite3-uuid
-          
-          # Examine the Makefile to understand dependencies
-          cat Makefile
-          
-          # Install missing dependencies if needed
-          pacman -S --noconfirm mingw-w64-x86_64-openssl
-          
-          # Check OpenSSL installation
-          pkg-config --libs --cflags openssl || echo "OpenSSL pkg-config not found"
-          ls -la /mingw64/include/uuid* || echo "No uuid headers found"
-          
-          # Modify the Makefile if necessary to use MinGW-specific flags
-          sed -i 's/-luuid/-Wl,--enable-stdcall-fixup/g' Makefile || echo "Sed failed"
-          
-          # Try to build with verbose output
-          make VERBOSE=1 || echo "UUID extension build failed, continuing without it"
-          
-          # Check if the build succeeded and copy the resulting library
-          if [ -f dist/uuid.so.* ]; then
-            cp dist/uuid.so.* /mingw64/lib/uuid.so
-            echo "UUID extension installed successfully"
-          else
-            echo "UUID extension build failed, checking available files:"
-            ls -la dist/ || echo "No dist directory"
-            find . -name "*.so*" || echo "No .so files found"
-            echo "Will continue without UUID extension"
-          fi
-
       - name: Setup version
         id: get_version
         shell: bash
@@ -173,17 +139,46 @@ jobs:
             exit 1
           fi
 
+      - name: Create ZIP archive
+        shell: pwsh
+        run: |
+          # Create a directory to package everything
+          $packageDir = "${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64"
+          New-Item -ItemType Directory -Path $packageDir
+          
+          # Copy the executable and all DLLs to the package directory
+          Copy-Item "${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe" -Destination "$packageDir/${{ env.binary_name }}.exe"
+          Copy-Item "*.dll" -Destination $packageDir
+          
+          # Create a simple README file
+          Set-Content -Path "$packageDir/README.txt" -Value @"
+          GeoPackage Optimizer
+          ====================
+          
+          Usage:
+          ${{ env.binary_name }}.exe -s path\to\your\file.gpkg -service-type [ows|oaf]
+          
+          For more information, visit: https://github.com/tabaqatdev/geopackage-optimizer-go
+          "@
+          
+          # Create the ZIP archive
+          Compress-Archive -Path $packageDir -DestinationPath "$packageDir.zip"
+          
+          # List the content of the zip for verification
+          Write-Host "Created ZIP archive with the following contents:"
+          Get-ChildItem $packageDir
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64
-          path: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe
+          path: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.exe
+            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-windows-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
