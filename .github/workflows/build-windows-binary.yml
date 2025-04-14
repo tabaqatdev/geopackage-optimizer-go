@@ -136,7 +136,7 @@ jobs:
           
           # Find and copy GEOS DLLs with correct names
           GEOS_C_DLL=$(ls /mingw64/bin/libgeos_c*.dll | head -1)
-          GEOS_DLL=$(ls /mingw64/bin/libgeos-*.dll | head -1)
+          GEOS_DLL=$(ls /mingw64/bin/libgeos*.dll | grep -v "_c" | head -1)
           
           if [ -n "$GEOS_C_DLL" ]; then
             echo "Copying GEOS C API DLL: $GEOS_C_DLL"
