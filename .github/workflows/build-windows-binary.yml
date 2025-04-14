@@ -35,40 +35,141 @@ jobs:
             mingw-w64-x86_64-openssl
             git
             make
+            patch
 
-      - name: Install UUID extension
+      - name: Install UUID extension for Windows
         shell: msys2 {0}
         run: |
           # Clone the sqlite3-uuid repository
           git clone https://github.com/benwebber/sqlite3-uuid.git
           cd sqlite3-uuid
           
-          # Examine the Makefile to understand dependencies
-          cat Makefile
+          # Create Windows-specific patch to use Windows UUID APIs instead of libuuid
+          cat > windows.patch << 'EOF'
+          diff --git a/src/uuid.c b/src/uuid.c
+          index 0000000..0000000 100644
+          --- a/src/uuid.c
+          +++ b/src/uuid.c
+          @@ -15,7 +15,11 @@
+           #include <string.h>
+           #include <sqlite3ext.h>
+           
+          +#ifdef _WIN32
+          +#include <rpc.h>
+          +#else
+           #include <uuid/uuid.h>
+          +#endif
+           
+           #ifdef USE_OPENSSL
+           #include <openssl/rand.h>
+          @@ -139,6 +143,7 @@
+           static void uuid_generate_v1(sqlite3_context * context)
+           {
+               unsigned char uuid[16];
+          +#ifndef _WIN32
+               uuid_t buf;
+               uuid_generate_time(buf);
+               /*
+          @@ -147,6 +152,20 @@
+                * bytes in a UUID.
+                */
+               memcpy(uuid, buf, sizeof(uuid));
+          +#else
+          +    /* Windows implementation using RPC UUID APIs */
+          +    UUID uuid_win;
+          +    UuidCreate(&uuid_win);
+          +    
+          +    /* Convert Windows UUID structure to byte array */
+          +    uuid[0] = (unsigned char)((uuid_win.Data1 >> 24) & 0xFF);
+          +    uuid[1] = (unsigned char)((uuid_win.Data1 >> 16) & 0xFF);
+          +    uuid[2] = (unsigned char)((uuid_win.Data1 >> 8) & 0xFF);
+          +    uuid[3] = (unsigned char)(uuid_win.Data1 & 0xFF);
+          +    uuid[4] = (unsigned char)((uuid_win.Data2 >> 8) & 0xFF);
+          +    uuid[5] = (unsigned char)(uuid_win.Data2 & 0xFF);
+          +    uuid[6] = (unsigned char)((uuid_win.Data3 >> 8) & 0xFF);
+          +    uuid[7] = (unsigned char)(uuid_win.Data3 & 0xFF);
+          +    memcpy(uuid + 8, uuid_win.Data4, 8);
+          +#endif
+               uuid_blob_to_internal_representation(context, uuid);
+           }
+           
+          @@ -167,8 +186,12 @@
+           static void uuid_generate_v4(sqlite3_context * context)
+           {
+               unsigned char uuid[16];
+          +#ifndef _WIN32
+               uuid_t buf;
+               uuid_generate_random(buf);
+          +#else
+          +    UUID uuid_win;
+          +    UuidCreate(&uuid_win);
+          +#endif
+           #ifdef USE_OPENSSL
+               /*
+                * The libuuid implementation uses /dev/urandom, which is fine for most
+          @@ -186,7 +209,20 @@
+                * The high bits of clock_seq_hi_and_reserved (clock_seq_hi_and_reserved & 0xC0).
+                */
+               RAND_bytes(uuid, sizeof(uuid));
+          +#ifndef _WIN32
+               memcpy(uuid, buf, sizeof(uuid));
+          +#else
+          +    /* Convert Windows UUID structure to byte array */
+          +    uuid[0] = (unsigned char)((uuid_win.Data1 >> 24) & 0xFF);
+          +    uuid[1] = (unsigned char)((uuid_win.Data1 >> 16) & 0xFF);
+          +    uuid[2] = (unsigned char)((uuid_win.Data1 >> 8) & 0xFF);
+          +    uuid[3] = (unsigned char)(uuid_win.Data1 & 0xFF);
+          +    uuid[4] = (unsigned char)((uuid_win.Data2 >> 8) & 0xFF);
+          +    uuid[5] = (unsigned char)(uuid_win.Data2 & 0xFF);
+          +    uuid[6] = (unsigned char)((uuid_win.Data3 >> 8) & 0xFF);
+          +    uuid[7] = (unsigned char)(uuid_win.Data3 & 0xFF);
+          +    memcpy(uuid + 8, uuid_win.Data4, 8);
+          +#endif
+               /* Set version to 4 --- truly random generation */
+               uuid[6] = (uuid[6] & 0x0F) | 0x40;
+               /* Set the high bits of clock_seq_hi_and_reserved to 10xxxxxx */
+          EOF
           
-          # Install missing dependencies if needed
+          # Apply the patch (using -p1 to match the diff format)
+          patch -p1 < windows.patch
+          
+          # Install OpenSSL development package
           pacman -S --noconfirm mingw-w64-x86_64-openssl
           
-          # Check OpenSSL installation
-          pkg-config --libs --cflags openssl || echo "OpenSSL pkg-config not found"
-          ls -la /mingw64/include/uuid* || echo "No uuid headers found"
+          # Build with Windows-specific flags
+          make CFLAGS="-g -fPIC -Wall -Wextra -Wno-unused-parameter -O2 -lcrypto -DUSE_OPENSSL -D_WIN32" LDFLAGS="-shared -lrpcrt4"
           
-          # Modify the Makefile if necessary to use MinGW-specific flags
-          sed -i 's/-luuid/-Wl,--enable-stdcall-fixup/g' Makefile || echo "Sed failed"
-          
-          # Try to build with verbose output
-          make VERBOSE=1 || echo "UUID extension build failed, continuing without it"
+          # Create directory if it doesn't exist
+          mkdir -p /mingw64/lib
           
           # Check if the build succeeded and copy the resulting library
           if [ -f dist/uuid.so.* ]; then
             cp dist/uuid.so.* /mingw64/lib/uuid.so
-            echo "UUID extension installed successfully"
+            echo "UUID extension for Windows built and installed successfully"
           else
             echo "UUID extension build failed, checking available files:"
             ls -la dist/ || echo "No dist directory"
             find . -name "*.so*" || echo "No .so files found"
             echo "Will continue without UUID extension"
           fi
+
+      - name: Setup test environment
+        shell: msys2 {0}
+        run: |
+          # Create directory for test data if needed
+          mkdir -p geopackage
+          
+          # Export environment variables for SpatiaLite
+          export SPATIALITE_SECURITY=relaxed
+          
+          # Create a sample init SQL file
+          cat > spatialite_init.sql << 'EOF'
+          SELECT load_extension('mod_spatialite');
+          SELECT InitSpatialMetaData(1);
+          EOF
+          
+          # Make SpatiaLite module accessible
+          cp /mingw64/lib/mod_spatialite.dll /mingw64/lib/mod_spatialite.so
 
       - name: Setup version
         id: get_version
@@ -88,6 +189,7 @@ jobs:
           export GOOS=windows
           export GOARCH=amd64
           export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
+          export SPATIALITE_SECURITY=relaxed
           go test ./... -covermode=atomic || echo "Tests failed but continuing with build"
 
       - name: Build Windows binary
