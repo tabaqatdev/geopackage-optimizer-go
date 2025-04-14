@@ -155,12 +155,21 @@ jobs:
               os.Setenv("PATH", execDir+string(os.PathListSeparator)+os.Getenv("PATH"))
             }
             
+            // Log OS information
+            log.Printf("Running on %s/%s", runtime.GOOS, runtime.GOARCH)
+            
             // Create a temporary database
-            db, err := sql.Open("sqlite3", ":memory:?_load_extension=1")
+            db, err := sql.Open("sqlite3", "file::memory:?_load_extension=1&_sqlite_extensions=1")
             if err != nil {
               log.Fatalf("Error opening in-memory database: %s", err)
             }
             defer db.Close()
+            
+            // Enable extension loading
+            _, err = db.Exec("PRAGMA trusted_schema = 1;")
+            if err != nil {
+              log.Printf("Warning: Could not set trusted_schema: %s", err)
+            }
             
             // Try multiple loading strategies
             loadOptions := []struct {

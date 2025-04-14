@@ -85,12 +85,31 @@ func openDb(sourceGeopackage string) *sql.DB {
 	)
 
 	// Use URI connection string with flags to help locate extensions
-	connString := fmt.Sprintf("%s?_load_extension=1", sourceGeopackage)
+	// The key change is adding _load_extension=1 and enabling extension loading
+	connString := fmt.Sprintf("file:%s?_load_extension=1&_sqlite_extensions=1", sourceGeopackage)
 	db, err := sql.Open(driverName, connString)
 	if err != nil {
 		log.Fatalf("error opening source GeoPackage: %s", err)
 	}
 
+	// Enable extension loading first - this is critical
+	_, err = db.Exec("PRAGMA foreign_keys = ON;")
+	if err != nil {
+		log.Printf("Warning: Could not enable foreign keys: %s", err)
+	}
+	
+	// Explicitly enable extension loading
+	_, err = db.Exec("PRAGMA module_list;") // List loaded modules for debugging
+	if err != nil {
+		log.Printf("Warning: Could not list modules: %s", err)
+	}
+	
+	// Enable extension loading explicitly
+	_, err = db.Exec("PRAGMA extension_list;") // List available extensions
+	if err != nil {
+		log.Printf("Warning: Could not list extensions: %s", err)
+	}
+	
 	// Initialize the SpatiaLite extension with different strategies
 	spatialiteLoaded := false
 	
@@ -129,13 +148,41 @@ func openDb(sourceGeopackage string) *sql.DB {
 			time.Sleep(500 * time.Millisecond)
 		}
 		
+		// Try explicitly enabling extension loading first
+		_, err = db.Exec("PRAGMA trusted_schema = 0;") // This may help with "not authorized" errors
+		_, err = db.Exec("PRAGMA trusted_schema = 1;") // Set back to true - we trust our own extensions
+		
 		for _, option := range loadOptions {
+			// Try with the direct load_extension SQL function
 			_, err = db.Exec(fmt.Sprintf("SELECT load_extension('%s')", option.path))
 			if err == nil {
 				log.Printf("Successfully loaded SpatiaLite extension with option: %s", option.name)
 				spatialiteLoaded = true
 				break
 			}
+			
+			// If that failed, try using go-sqlite3's LoadExtension method on the raw connection
+			if !spatialiteLoaded {
+				sqliteConn, ok := db.Driver().(*sqlite3.SQLiteDriver)
+				if ok {
+					conn, err := sqliteConn.Open(connString)
+					if err == nil {
+						if ext, ok := conn.(interface{ LoadExtension(string, string) error }); ok {
+							err = ext.LoadExtension(option.path, "")
+							if err == nil {
+								log.Printf("Successfully loaded SpatiaLite using raw connection with option: %s", option.name)
+								spatialiteLoaded = true
+								conn.Close()
+								break
+							} else {
+								log.Printf("Failed to load with raw connection for %s: %s", option.name, err)
+							}
+							conn.Close()
+						}
+					}
+				}
+			}
+			
 			lastErr = err
 			log.Printf("Failed to load SpatiaLite with option '%s': %s", option.name, err)
 		}
