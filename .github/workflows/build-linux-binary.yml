@@ -60,9 +60,20 @@ jobs:
           export GOARCH=${{ matrix.arch }}
           go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
 
-      - name: Zip binary
+      - name: Copy mod_spatialite.so to output
         run: |
-          zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}.zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
+          if [ -f /usr/lib/mod_spatialite.so ]; then
+            cp /usr/lib/mod_spatialite.so .
+          elif [ -f /usr/lib/mod_spatialite.so.8 ]; then
+            cp /usr/lib/mod_spatialite.so.8 ./mod_spatialite.so
+          else
+            echo "mod_spatialite.so not found!" && exit 1
+          fi
+
+      - name: Zip binary and extension
+        run: |
+          zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}.zip \
+            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }} mod_spatialite.so
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')

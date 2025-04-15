@@ -135,9 +135,9 @@ func createIndex(tableName string, columnNames []string, indexName string, uniqu
 
 	var queryStr string
 	if unique {
-		queryStr = "CREATE UNIQUE INDEX %s ON %s(%s);"
+		queryStr = "CREATE UNIQUE INDEX \"%s\" ON \"%s\"(%s);"
 	} else {
-		queryStr = "CREATE INDEX %s ON %s(%s);"
+		queryStr = "CREATE INDEX \"%s\" ON \"%s\"(%s);"
 	}
 
 	query := fmt.Sprintf(queryStr, indexName, tableName, strings.Join(columnNames, ","))
@@ -150,7 +150,7 @@ func createIndex(tableName string, columnNames []string, indexName string, uniqu
 }
 
 func setColumnValue(tableName string, columnName string, value string, db *sql.DB) {
-	query := fmt.Sprintf("UPDATE '%s' SET '%s' = %s;", tableName, columnName, value)
+	query := fmt.Sprintf("UPDATE \"%s\" SET \"%s\" = %s;", tableName, columnName, value)
 	log.Printf("executing query: %s\n", query)
 
 	_, err := db.Exec(query)
@@ -160,7 +160,7 @@ func setColumnValue(tableName string, columnName string, value string, db *sql.D
 }
 
 func addColumn(tableName string, columnName string, columnType string, db *sql.DB) {
-	query := fmt.Sprintf("ALTER TABLE '%s' ADD '%s' %s;", tableName, columnName, columnType)
+	query := fmt.Sprintf("ALTER TABLE \"%s\" ADD \"%s\" %s;", tableName, columnName, columnType)
 	log.Printf("executing query: %s\n", query)
 
 	_, err := db.Exec(query)

@@ -59,9 +59,20 @@ jobs:
           export GOARCH=${{ matrix.arch }}
           go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }}
 
-      - name: Zip binary
+      - name: Copy mod_spatialite.dylib to output
         run: |
-          zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }}.zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }}
+          if [ -f /opt/homebrew/lib/mod_spatialite.dylib ]; then
+            cp /opt/homebrew/lib/mod_spatialite.dylib .
+          elif [ -f /usr/local/lib/mod_spatialite.dylib ]; then
+            cp /usr/local/lib/mod_spatialite.dylib .
+          else
+            echo "mod_spatialite.dylib not found!" && exit 1
+          fi
+
+      - name: Zip binary and extension
+        run: |
+          zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }}.zip \
+            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }} mod_spatialite.dylib
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
