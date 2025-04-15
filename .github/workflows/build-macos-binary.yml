@@ -50,9 +50,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
+      - name: Install dependencies
+        run: |
+          brew install sqlite spatialite
+
       - name: Build macOS binary
         run: |
-          export CGO_ENABLED=0
+          export CGO_ENABLED=1
           export GOOS=darwin
           export GOARCH=${{ matrix.arch }}
           go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-darwin-${{ matrix.arch }}

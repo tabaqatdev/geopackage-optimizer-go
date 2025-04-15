@@ -50,9 +50,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libspatialite-dev
+
       - name: Build Linux binary
         run: |
-          export CGO_ENABLED=0
+          export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=${{ matrix.arch }}
           go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
