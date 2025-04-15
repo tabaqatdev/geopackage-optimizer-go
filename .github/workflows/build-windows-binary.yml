@@ -48,6 +48,14 @@ jobs:
             echo "version=dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Sanitize ref name
+        id: sanitize_ref
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}"
+          sanitized=$(echo "$ref" | tr '/\\' '__')
+          echo "sanitized_ref=$sanitized" >> $GITHUB_OUTPUT
+
       - name: Copy SQLite DLLs to system path
         shell: msys2 {0}
         run: |

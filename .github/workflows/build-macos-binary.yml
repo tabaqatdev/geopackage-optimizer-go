@@ -34,6 +34,22 @@ jobs:
             echo "version=dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Sanitize ref name
+        id: sanitize_ref
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}"
+          sanitized=$(echo "$ref" | tr '/\\' '__')
+          echo "sanitized_ref=$sanitized" >> $GITHUB_OUTPUT
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ steps.sanitize_ref.outputs.sanitized_ref || github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Build macOS binary
         run: |
           export CGO_ENABLED=0
