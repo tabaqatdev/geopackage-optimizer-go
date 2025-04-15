@@ -2,8 +2,6 @@ name: build-macos-binary
 
 on:
   push:
-    branches:
-      - master
     tags:
       - '*'
 

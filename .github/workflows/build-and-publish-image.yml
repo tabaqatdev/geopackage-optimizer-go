@@ -2,9 +2,7 @@ name: build
 env:
   image:  pdok/geopackage-optimizer-go 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
 jobs:
   docker:
     runs-on: ubuntu-latest

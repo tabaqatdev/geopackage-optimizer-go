@@ -2,8 +2,6 @@ name: Build and Publish Docker Image (GHCR)
 
 on:
   push:
-    branches:
-      - master
     tags:
       - '*'
 

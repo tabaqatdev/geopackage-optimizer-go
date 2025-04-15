@@ -2,8 +2,6 @@ name: build-linux-binary
 
 on:
   push:
-    branches:
-      - master
     tags:
       - '*'
 

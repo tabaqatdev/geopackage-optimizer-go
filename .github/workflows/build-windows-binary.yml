@@ -3,8 +3,6 @@ env:
   binary_name: geopackage-optimizer
 on:
   push:
-    branches:
-      - master
     tags:
       - '*'
 jobs:
