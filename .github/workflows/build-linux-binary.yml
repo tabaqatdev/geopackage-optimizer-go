@@ -1,0 +1,54 @@
+name: build-linux-binary
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      binary_name: geopackage-optimizer
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.8'
+
+      - name: Set up version
+        id: get_version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "version=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Linux binary
+        run: |
+          export CGO_ENABLED=0
+          export GOOS=linux
+          export GOARCH=${{ matrix.arch }}
+          go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
+
+      - name: Zip binary
+        run: |
+          zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}.zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
