@@ -53,6 +53,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsqlite3-dev libspatialite-dev
 
+      - name: Install cross-compiler for arm64
+        if: matrix.arch == 'arm64'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Set cross-compilation environment
+        if: matrix.arch == 'arm64'
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+
       - name: Build Linux binary
         run: |
           export CGO_ENABLED=1
