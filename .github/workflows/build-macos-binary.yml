@@ -50,7 +50,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install sqlite spatialite
+          brew install sqlite libspatialite
 
       - name: Build macOS binary
         run: |
