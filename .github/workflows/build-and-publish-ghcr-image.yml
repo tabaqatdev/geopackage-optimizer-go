@@ -28,12 +28,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=ref,event=branch
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest,enable=true
+            type=raw,value=master,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=tag,prefix=v
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
