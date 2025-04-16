@@ -71,20 +71,15 @@ jobs:
           export GOARCH=${{ matrix.arch }}
           go build -o ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
 
-      - name: Copy mod_spatialite.so to output
+      - name: NOTE
         run: |
-          if [ -f /usr/lib/mod_spatialite.so ]; then
-            cp /usr/lib/mod_spatialite.so .
-          elif [ -f /usr/lib/mod_spatialite.so.8 ]; then
-            cp /usr/lib/mod_spatialite.so.8 ./mod_spatialite.so
-          else
-            echo "mod_spatialite.so not found!" && exit 1
-          fi
+          # NOTE: On Linux, do NOT bundle mod_spatialite.so or other .so files. Users must install required libraries (libspatialite8, libgeos-c1, etc.) via package manager on the target system.
+          # If you want to provide a fully self-contained binary, consider static linking or containerization.
 
-      - name: Zip binary and extension
+      - name: Zip binary
         run: |
           zip ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}.zip \
-            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }} mod_spatialite.so
+            ${{ env.binary_name }}-${{ steps.get_version.outputs.version }}-linux-${{ matrix.arch }}
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
