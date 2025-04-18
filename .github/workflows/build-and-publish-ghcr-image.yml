@@ -30,7 +30,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=true
             type=raw,value=master,enable=${{ github.ref == 'refs/heads/master' }}
-            type=ref,event=tag,prefix=v
+            type=ref,event=tag
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
